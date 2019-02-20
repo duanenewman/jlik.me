@@ -27,15 +27,18 @@ namespace jlikme.corefn
 
         // this is redirect target when the short URL isn't found
         public static readonly string FallbackUrl = Environment.GetEnvironmentVariable(Utility.ENV_FALLBACK) ??
-            "https://blog.jeremylikness.com/?utm_source=jeliknes&utm_medium=redirect&utm_campaign=jlik_me";
+            "http://duanenewman.net/?utm_source=duaneat&utm_medium=redirect&utm_campaign=duaneat";
 
         // for tagging, the "utm_source" or source part of WebTrends tag 
         public static readonly string Source = Environment.GetEnvironmentVariable(Utility.ENV_SOURCE) ??
-            "jeliknes";
+            "duaneat";
 
         // default campaign, for tagging 
         public static readonly string DefaultCampaign = Environment.GetEnvironmentVariable(Utility.ENV_CAMPAIGN) ??
-            "link";
+            "duaneat";
+
+        public static readonly string ShortUrlHost =
+            Environment.GetEnvironmentVariable(Utility.ENV_SHORT_URL_HOST) ?? "http://duane.at";
 
         private static async Task TrackDependencyAsync(
             string dependency,
@@ -67,32 +70,17 @@ namespace jlikme.corefn
         public static HttpResponseMessage Admin([HttpTrigger(AuthorizationLevel.Anonymous, "get")]HttpRequestMessage req,
             ILogger log)
         {
-            const string PATH = "LinkShortener.html";
+            const string path = "LinkShortener.html";
+            const string mediaType = "text/html";
 
             var result = SecurityCheck(req);
             if (result != null)
             {
                 return result;
             }
-
-            var scriptPath = Path.Combine(Environment.CurrentDirectory, "www");
-            if (!Directory.Exists(scriptPath))
-            {
-                scriptPath = Path.Combine(
-                    Environment.GetEnvironmentVariable("HOME", EnvironmentVariableTarget.Process),
-                    @"site\wwwroot\www");
-            }
-            var filePath = Path.GetFullPath(Path.Combine(scriptPath, PATH));
-            if (!File.Exists(filePath))
-            {
-                return new HttpResponseMessage(HttpStatusCode.NotFound);
-            }
-            log.LogInformation($"Attempting to retrieve file at path {filePath}.");
-            var response = new HttpResponseMessage(HttpStatusCode.OK);
-            var stream = new FileStream(filePath, FileMode.Open);
-            response.Content = new StreamContent(stream);
-            response.Content.Headers.ContentType = new MediaTypeHeaderValue("text/html");
-            return response;
+            
+            return StreamWwwContent(log, path, mediaType);
+            
         }
 
         [FunctionName("ShortenUrl")]
@@ -138,9 +126,6 @@ namespace jlikme.corefn
                 log.LogInformation($"URL: {url} Tag UTM? {utm} Tag WebTrends? {wt}");
                 log.LogInformation($"Current key: {keyTable.Id}");
 
-                // get host for building short URL 
-                var host = req.RequestUri.GetLeftPart(UriPartial.Authority);
-
                 // strategy for getting a new code 
                 string getCode() => Utility.Encode(keyTable.Id++);
 
@@ -183,7 +168,7 @@ namespace jlikme.corefn
                     result.AddRange(await analytics.BuildAsync(
                         input,
                         Source,
-                        host,
+                        ShortUrlHost,
                         getCode,
                         saveWithTelemetryAsync,
                         logFn,
@@ -195,7 +180,7 @@ namespace jlikme.corefn
                     result.Add(await Utility.SaveUrlAsync(
                         url,
                         null,
-                        host,
+                        ShortUrlHost,
                         getCode,
                         logFn,
                         saveWithTelemetryAsync));
@@ -216,7 +201,7 @@ namespace jlikme.corefn
             Route = "UrlRedirect/{shortUrl}")]HttpRequestMessage req,
             [Table(tableName: Utility.TABLE)]CloudTable inputTable,
             string shortUrl,
-            [Queue(queueName: Utility.QUEUE)]IAsyncCollector<string> queue,
+            //[Queue(queueName: Utility.QUEUE)]IAsyncCollector<string> queue,
             ILogger log)
         {
             log.LogInformation($"C# HTTP trigger function processed a request for shortUrl {shortUrl}");
@@ -231,6 +216,11 @@ namespace jlikme.corefn
                     System.Text.Encoding.UTF8,
                     "text/plain");
                 return resp;
+            }
+            else if (shortUrl == Utility.FAV_ICON)
+            {
+                log.LogInformation("Request for favicon.ico");
+                return StreamFavoriteIcon(log);
             }
 
             var redirectUrl = FallbackUrl;
@@ -264,7 +254,7 @@ namespace jlikme.corefn
                     referrer = req.Headers.Referrer.ToString();
                 }
                 log.LogInformation($"User agent: {req.Headers.UserAgent.ToString()}");
-                await queue.AddAsync($"{shortUrl}|{redirectUrl}|{DateTime.UtcNow}|{referrer}|{req.Headers.UserAgent.ToString().Replace('|', '^')}");
+                //await queue.AddAsync($"{shortUrl}|{redirectUrl}|{DateTime.UtcNow}|{referrer}|{req.Headers.UserAgent.ToString().Replace('|', '^')}");
             }
             else
             {
@@ -276,136 +266,168 @@ namespace jlikme.corefn
             return res;
         }
 
+        private static HttpResponseMessage StreamFavoriteIcon(ILogger log)
+        {
+            const string path = "favicon.ico";
+            const string mediaType = "image/vnd.microsoft.icon";
+
+            return StreamWwwContent(log, path, mediaType);
+        }
+
+        private static HttpResponseMessage StreamWwwContent(ILogger log, string path, string mediaType)
+        {
+            var scriptPath = Path.Combine(Environment.CurrentDirectory, "www");
+            if (!Directory.Exists(scriptPath))
+            {
+                scriptPath = Path.Combine(
+                    Environment.GetEnvironmentVariable("HOME", EnvironmentVariableTarget.Process),
+                    @"site\wwwroot\www");
+            }
+
+            var filePath = Path.GetFullPath(Path.Combine(scriptPath, path));
+            if (!File.Exists(filePath))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            log.LogInformation($"Attempting to retrieve file at path {filePath}.");
+            var response = new HttpResponseMessage(HttpStatusCode.OK);
+            var stream = new FileStream(filePath, FileMode.Open);
+            response.Content = new StreamContent(stream);
+            response.Content.Headers.ContentType = new MediaTypeHeaderValue(mediaType);
+            return response;
+        }
+
         [FunctionName("KeepAlive")]
-        public static void KeepAlive([TimerTrigger(scheduleExpression: "0 */4 * * * *")]TimerInfo myTimer, ILogger log)
+        public static void KeepAlive([TimerTrigger(scheduleExpression: "0 */5 * * * *")]TimerInfo myTimer, ILogger log)
         {
             log.LogInformation("Keep-Alive invoked.");
         }
 
-        [FunctionName("ProcessQueue")]
-        public static void ProcessQueue([QueueTrigger(queueName: Utility.QUEUE)]string request,
-            [CosmosDB(Utility.URL_TRACKING, Utility.URL_STATS, CreateIfNotExists = true, ConnectionStringSetting = "CosmosDb")]out dynamic doc,
-            ILogger log)
-        {
-            try
-            {
-                AnalyticsEntry parsed = Utility.ParseQueuePayload(request);
-                var page = parsed.LongUrl.AsPage(HttpUtility.ParseQueryString);
+        //[FunctionName("ProcessQueue")]
+        //public static void ProcessQueue([QueueTrigger(queueName: Utility.QUEUE)]string request,
+        //    [CosmosDB(Utility.URL_TRACKING, Utility.URL_STATS, CreateIfNotExists = true, ConnectionStringSetting = "CosmosDb")]out dynamic doc,
+        //    ILogger log)
+        //{
+        //    try
+        //    {
+        //        AnalyticsEntry parsed = Utility.ParseQueuePayload(request);
+        //        var page = parsed.LongUrl.AsPage(HttpUtility.ParseQueryString);
 
-                telemetry.TrackPageView(page);
-                log.LogInformation($"Tracked page view {page}");
+        //        telemetry.TrackPageView(page);
+        //        log.LogInformation($"Tracked page view {page}");
 
-                var analytics = parsed.LongUrl.ExtractCampaignAndMedium(HttpUtility.ParseQueryString);
-                var campaign = analytics.Item1;
-                var medium = analytics.Item2;
+        //        var analytics = parsed.LongUrl.ExtractCampaignAndMedium(HttpUtility.ParseQueryString);
+        //        var campaign = analytics.Item1;
+        //        var medium = analytics.Item2;
 
-                if (!string.IsNullOrWhiteSpace(medium))
-                {
-                    telemetry.TrackEvent(medium);
-                    log.LogInformation($"Tracked custom event: {medium}");
-                }
+        //        if (!string.IsNullOrWhiteSpace(medium))
+        //        {
+        //            telemetry.TrackEvent(medium);
+        //            log.LogInformation($"Tracked custom event: {medium}");
+        //        }
 
-                // cosmos DB 
-                var normalize = new[] { '/' };
-                doc = new ExpandoObject();
-                doc.id = Guid.NewGuid().ToString();
-                doc.page = page.TrimEnd(normalize);
-                if (!string.IsNullOrWhiteSpace(parsed.ShortUrl))
-                {
-                    doc.shortUrl = parsed.ShortUrl;
-                }
-                if (!string.IsNullOrWhiteSpace(campaign))
-                {
-                    doc.campaign = campaign;
-                }
-                if (parsed.Referrer != null)
-                {
-                    doc.referrerUrl = parsed.Referrer.AsPage(HttpUtility.ParseQueryString);
-                    doc.referrerHost = parsed.Referrer.DnsSafeHost;
-                }
-                if (!string.IsNullOrWhiteSpace(parsed.Agent))
-                {
-                    doc.agent = parsed.Agent;
-                    try
-                    {
-                        var parser = UAParser.Parser.GetDefault();
-                        var client = parser.Parse(parsed.Agent);
-                        {
-                            var browser = client.UserAgent.Family;
-                            var version = client.UserAgent.Major;
-                            var browserVersion = $"{browser} {version}";
-                            doc.browser = browser;
-                            doc.browserVersion = version;
-                            doc.browserWithVersion = browserVersion;
-                        }
-                        if (client.Device.IsSpider)
-                        {
-                            doc.crawler = 1;
-                        }
-                        if (parsed.Agent.ToLowerInvariant().Contains("mobile"))
-                        {
-                            doc.mobile = 1;
-                            var manufacturer = client.Device.Brand;
-                            doc.mobileManufacturer = manufacturer;
-                            var model = client.Device.Model;
-                            doc.mobileModel = model;
-                            doc.mobileDevice = $"{manufacturer} {model}";
-                        }
-                        else
-                        {
-                            doc.desktop = 1;
-                        }
-                        if (!string.IsNullOrWhiteSpace(client.OS.Family))
-                        {
-                            doc.platform = client.OS.Family;
-                            doc.platformVersion = client.OS.Major;
-                            doc.platformWithVersion = $"{client.OS.Family} {client.OS.Major}";
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        log.LogError(ex, $"Error parsing user agent [{parsed.Agent}]");
-                    }
-                }
-                doc.count = 1;
-                doc.timestamp = parsed.TimeStamp;
-                doc.host = parsed.LongUrl.DnsSafeHost;
-                if (!string.IsNullOrWhiteSpace(medium))
-                {
-                    ((IDictionary<string, object>)doc).Add(medium, 1);
-                }
-                log.LogInformation($"CosmosDB: {doc.id}|{doc.page}|{parsed.ShortUrl}|{campaign}|{medium}");
-            }
-            catch (Exception ex)
-            {
-                log.LogError(ex, "An unexpected error occurred.");
-                throw;
-            }
-        }
+        //        // cosmos DB 
+        //        var normalize = new[] { '/' };
+        //        doc = new ExpandoObject();
+        //        doc.id = Guid.NewGuid().ToString();
+        //        doc.page = page.TrimEnd(normalize);
+        //        if (!string.IsNullOrWhiteSpace(parsed.ShortUrl))
+        //        {
+        //            doc.shortUrl = parsed.ShortUrl;
+        //        }
+        //        if (!string.IsNullOrWhiteSpace(campaign))
+        //        {
+        //            doc.campaign = campaign;
+        //        }
+        //        if (parsed.Referrer != null)
+        //        {
+        //            doc.referrerUrl = parsed.Referrer.AsPage(HttpUtility.ParseQueryString);
+        //            doc.referrerHost = parsed.Referrer.DnsSafeHost;
+        //        }
+        //        if (!string.IsNullOrWhiteSpace(parsed.Agent))
+        //        {
+        //            doc.agent = parsed.Agent;
+        //            try
+        //            {
+        //                var parser = UAParser.Parser.GetDefault();
+        //                var client = parser.Parse(parsed.Agent);
+        //                {
+        //                    var browser = client.UserAgent.Family;
+        //                    var version = client.UserAgent.Major;
+        //                    var browserVersion = $"{browser} {version}";
+        //                    doc.browser = browser;
+        //                    doc.browserVersion = version;
+        //                    doc.browserWithVersion = browserVersion;
+        //                }
+        //                if (client.Device.IsSpider)
+        //                {
+        //                    doc.crawler = 1;
+        //                }
+        //                if (parsed.Agent.ToLowerInvariant().Contains("mobile"))
+        //                {
+        //                    doc.mobile = 1;
+        //                    var manufacturer = client.Device.Brand;
+        //                    doc.mobileManufacturer = manufacturer;
+        //                    var model = client.Device.Model;
+        //                    doc.mobileModel = model;
+        //                    doc.mobileDevice = $"{manufacturer} {model}";
+        //                }
+        //                else
+        //                {
+        //                    doc.desktop = 1;
+        //                }
+        //                if (!string.IsNullOrWhiteSpace(client.OS.Family))
+        //                {
+        //                    doc.platform = client.OS.Family;
+        //                    doc.platformVersion = client.OS.Major;
+        //                    doc.platformWithVersion = $"{client.OS.Family} {client.OS.Major}";
+        //                }
+        //            }
+        //            catch (Exception ex)
+        //            {
+        //                log.LogError(ex, $"Error parsing user agent [{parsed.Agent}]");
+        //            }
+        //        }
+        //        doc.count = 1;
+        //        doc.timestamp = parsed.TimeStamp;
+        //        doc.host = parsed.LongUrl.DnsSafeHost;
+        //        if (!string.IsNullOrWhiteSpace(medium))
+        //        {
+        //            ((IDictionary<string, object>)doc).Add(medium, 1);
+        //        }
+        //        log.LogInformation($"CosmosDB: {doc.id}|{doc.page}|{parsed.ShortUrl}|{campaign}|{medium}");
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        log.LogError(ex, "An unexpected error occurred.");
+        //        throw;
+        //    }
+        //}
 
-        [FunctionName(name: "UpdateTwitter")]
-        public static async Task<HttpResponseMessage> Twitter([HttpTrigger(AuthorizationLevel.Function, "post",
-            Route = "UpdateTwitter/{id}")]HttpRequestMessage req,
-            [CosmosDB(Utility.URL_TRACKING, Utility.URL_STATS, CreateIfNotExists = false, ConnectionStringSetting = "CosmosDb", Id = "{id}")]dynamic doc,
-            string id,
-            ILogger log)
-        {
-            var result = SecurityCheck(req);
-            if (result != null)
-            {
-                return result;
-            }
-            if (doc == null)
-            {
-                log.LogError($"Doc not found with id: {id}.");
-                return req.CreateResponse(HttpStatusCode.NotFound);
-            }
-            var link = await req.Content.ReadAsStringAsync();
-            if (!string.IsNullOrWhiteSpace(link))
-            {
-                doc.referralTweet = link;
-            }
-            return req.CreateResponse(HttpStatusCode.OK);
-        }
+        //[FunctionName(name: "UpdateTwitter")]
+        //public static async Task<HttpResponseMessage> Twitter([HttpTrigger(AuthorizationLevel.Function, "post",
+        //    Route = "UpdateTwitter/{id}")]HttpRequestMessage req,
+        //    [CosmosDB(Utility.URL_TRACKING, Utility.URL_STATS, CreateIfNotExists = false, ConnectionStringSetting = "CosmosDb", Id = "{id}")]dynamic doc,
+        //    string id,
+        //    ILogger log)
+        //{
+        //    var result = SecurityCheck(req);
+        //    if (result != null)
+        //    {
+        //        return result;
+        //    }
+        //    if (doc == null)
+        //    {
+        //        log.LogError($"Doc not found with id: {id}.");
+        //        return req.CreateResponse(HttpStatusCode.NotFound);
+        //    }
+        //    var link = await req.Content.ReadAsStringAsync();
+        //    if (!string.IsNullOrWhiteSpace(link))
+        //    {
+        //        doc.referralTweet = link;
+        //    }
+        //    return req.CreateResponse(HttpStatusCode.OK);
+        //}
     }
 }

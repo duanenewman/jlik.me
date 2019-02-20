@@ -14,7 +14,7 @@
       "responseOverrides": {
         "response.statusCode": "301",
         "response.statusReason": "Moved Permanently",
-        "response.headers.location": "https://blog.jeremylikness.com/?utm_source=jlikme&utm_medium=link&utm_campaign=url-shortener"
+        "response.headers.location": "http://duanenewman.net/?utm_source=duaneat&utm_medium=link&utm_campaign=url-shortener"
       }
     }
   }

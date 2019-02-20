@@ -13,8 +13,9 @@ namespace jlikme.domain
     {
         public const string ROBOTS = "robots.txt";
         public const string ROBOT_RESPONSE = "user-agent: *\ndisallow: /";
-        public const string URL_TRACKING = "url-tracking";
-        public const string URL_STATS = "url-stats";
+        //public const string URL_TRACKING = "url-tracking";
+        //public const string URL_STATS = "url-stats";
+        public const string FAV_ICON = "favicon.ico";
 
         public const string UTM_MEDIUM = "utm_medium";
         public const string UTM_SOURCE = "utm_source";
@@ -22,12 +23,13 @@ namespace jlikme.domain
         public const string WTMCID = "WT.mc_id";
 
         public const string TABLE = "urls";
-        public const string QUEUE = "requests";
+        //public const string QUEUE = "requests";
         public const string KEY = "KEY";
 
         public const string ENV_FALLBACK = "SHORTENER_FALLBACK_URL";
         public const string ENV_SOURCE = "SHORTENER_SOURCE";
         public const string ENV_CAMPAIGN = "SHORTENER_DEFAULT_CAMPAIGN";
+        public const string ENV_SHORT_URL_HOST = "SHORTENER_HOST_URL";
 
         private const string Alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
 
@@ -77,6 +79,7 @@ namespace jlikme.domain
             await save(newUrl);
             return new ShortResponse
             {
+                Medium = medium,
                 ShortUrl = newUrl.RowKey.AsShortUrlWithHost(host),
                 LongUrl = WebUtility.UrlDecode(newUrl.Url)
             };
